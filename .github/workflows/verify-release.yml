@@ -17,7 +17,7 @@ on:
         description: Draft QA baseline asset ID (upgrade only)
         default: ''
 permissions:
-  contents: read
+  contents: write # Required to read private draft release assets.
 jobs:
   windows:
     runs-on: windows-2022
