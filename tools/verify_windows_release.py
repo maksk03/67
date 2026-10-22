@@ -104,7 +104,7 @@ REPORT['frozen_selftest'] = diagnostic
 REPORT['archive_sha256'] = manifest['sha256']
 
 if MODE == 'simple':
-    simple_asset = next(item for item in release['assets'] if item['name'] == '67-windows-x64-prosty.zip')
+    simple_asset = next(item for item in release['assets'] if item['name'] == '67.zip')
     simple_archive = download(simple_asset, ROOT / 'simple.zip')
     simple_root = ROOT / 'simple'
     unpack(simple_archive, simple_root)
