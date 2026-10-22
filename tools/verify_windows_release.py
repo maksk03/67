@@ -14,7 +14,7 @@ REPO = 'maksk03/67'
 VERSION = os.environ['VERSION67']
 assert re.fullmatch(r'\d{1,3}\.\d{1,3}\.\d{1,3}', VERSION)
 MODE = os.environ.get('MODE67', 'preflight')
-assert MODE in ('preflight', 'upgrade')
+assert MODE in ('preflight', 'upgrade', 'simple')
 ROOT = Path(os.environ['RUNNER_TEMP']) / '67-release-check'
 ROOT.mkdir()
 REPORT = {'version': VERSION, 'mode': MODE}
@@ -103,7 +103,30 @@ assert diagnostic['ok'] is True and diagnostic['capture_started'] is False
 REPORT['frozen_selftest'] = diagnostic
 REPORT['archive_sha256'] = manifest['sha256']
 
-if MODE == 'upgrade':
+if MODE == 'simple':
+    simple_asset = next(item for item in release['assets'] if item['name'] == '67-windows-x64-prosty.zip')
+    simple_archive = download(simple_asset, ROOT / 'simple.zip')
+    simple_root = ROOT / 'simple'
+    unpack(simple_archive, simple_root)
+    with zipfile.ZipFile(archive) as original, zipfile.ZipFile(simple_archive) as wrapped:
+        assert set(wrapped.namelist()) == {'67.exe'} | {'Program/App/' + name for name in original.namelist()}
+        for name in original.namelist():
+            assert original.read(name) == wrapped.read('Program/App/' + name)
+    launcher = simple_root / '67.exe'
+    launcher_sha256 = hashlib.sha256(launcher.read_bytes()).hexdigest()
+    current_app = simple_root / 'Program' / 'App'
+    try:
+        subprocess.Popen([str(launcher)], cwd=ROOT, env=APP_ENV)
+        wait_for_license(current_app)
+        assert SETTINGS.read_bytes() == SETTINGS_BEFORE
+    finally:
+        stop(current_app)
+    current_app.rename(ROOT / 'simple-current-reference')
+    REPORT['simple_package'] = {'top_level': ['67.exe', 'Program'],
+                                'app_files_unchanged': True, 'launcher_opens_license_gate': True,
+                                'archive_sha256': hashlib.sha256(simple_archive.read_bytes()).hexdigest()}
+
+if MODE in ('upgrade', 'simple'):
     assert release['draft'] is False and release['prerelease'] is False
     latest = api(f'repos/{REPO}/releases/latest')
     assert latest['tag_name'] == 'v' + VERSION
@@ -111,16 +134,17 @@ if MODE == 'upgrade':
     assert baseline_id.isdecimal()
     baseline_asset = api(f'repos/{REPO}/releases/assets/{baseline_id}')
     baseline = download(baseline_asset, ROOT / 'old.zip')
-    install = ROOT / 'installed'
+    install = simple_root / 'Program' / 'App' if MODE == 'simple' else ROOT / 'installed'
     unpack(baseline, install)
     before = json.loads((install / '67-install.json').read_text(encoding='utf-8'))
     assert before['version'] != VERSION
     try:
-        subprocess.Popen([str(install / '67_Odbudowany.exe')], cwd=install, env=APP_ENV)
+        start_exe = launcher if MODE == 'simple' else install / '67_Odbudowany.exe'
+        subprocess.Popen([str(start_exe)], cwd=ROOT, env=APP_ENV)
         deadline = time.monotonic() + 150
         completed = None
         while time.monotonic() < deadline:
-            statuses = list(ROOT.glob('.67-update-*/status.json'))
+            statuses = list(install.parent.glob('.67-update-*/status.json'))
             for path in statuses:
                 try:
                     value = json.loads(path.read_text(encoding='utf-8'))
@@ -145,10 +169,14 @@ if MODE == 'upgrade':
         REPORT['automatic_update'] = {'from': before['version'], 'to': VERSION,
                                       'installer': completed['state'], 'all_files_match': True,
                                       'settings_preserved': True, 'license_required': True}
+        if MODE == 'simple':
+            assert hashlib.sha256(launcher.read_bytes()).hexdigest() == launcher_sha256
+            assert {item.name for item in simple_root.iterdir()} == {'67.exe', 'Program'}
+            REPORT['simple_package']['layout_preserved_after_update'] = True
         stop(install)
         fake_key = '67-' + '0' * 64
         (PROFILE / 'license.json').write_text(json.dumps({'schema': 1, 'license_key': fake_key, 'valid': True}), encoding='utf-8')
-        subprocess.Popen([str(install / '67_Odbudowany.exe')], cwd=install, env=APP_ENV)
+        subprocess.Popen([str(start_exe)], cwd=ROOT, env=APP_ENV)
         wait_for_license(install)
         time.sleep(20)
         assert all(item['MainWindowTitle'] == '67 · licencja' for item in processes(install))
