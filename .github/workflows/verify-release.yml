@@ -1,0 +1,40 @@
+name: Verify Windows release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version
+        required: true
+        default: '0.1.2'
+      mode:
+        description: Verification stage
+        type: choice
+        options:
+          - preflight
+          - upgrade
+        default: preflight
+      baseline_asset:
+        description: Draft QA baseline asset ID (upgrade only)
+        default: ''
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 8
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION67: ${{ inputs.version }}
+      MODE67: ${{ inputs.mode }}
+      BASELINE_ASSET67: ${{ inputs.baseline_asset }}
+    steps:
+      - name: Run release checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $file = gh api "repos/$env:GITHUB_REPOSITORY/contents/tools/verify_windows_release.py?ref=$env:GITHUB_SHA" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read verification script' }
+          $script = Join-Path $env:RUNNER_TEMP 'verify_windows_release.py'
+          [IO.File]::WriteAllBytes($script, [Convert]::FromBase64String($file.content))
+          python $script
+          if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }
