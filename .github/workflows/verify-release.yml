@@ -12,6 +12,7 @@ on:
         options:
           - preflight
           - upgrade
+          - simple
         default: preflight
       baseline_asset:
         description: Draft QA baseline asset ID (upgrade only)
